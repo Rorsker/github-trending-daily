@@ -2,6 +2,8 @@
 
 独立 Python 3.12+ 项目。每日采集 GitHub Trending，使用 DeepSeek API 对尚未收录的仓库生成中文介绍与关注理由，保存 Markdown 报告，并可通过 AstrBot OpenAPI 推送到 QQ 群。无需 Codex CLI、Docker 或第三方 Python 包。
 
+**面向 Agent 的部署指南：**[AGENTS.md](AGENTS.md)。人工部署步骤见下文。
+
 ## 安装
 
 ```sh
@@ -31,15 +33,18 @@ python -m unittest -q
 
 ## Linux 定时运行
 
-示例单元在 `deploy/`。朋友需要先获得该 Private 仓库的读取权限。以有 `sudo` 权限的用户操作，完成上述安装后，将仓库放在 `/opt/github-trending-daily`，并执行：
+示例单元在 `deploy/`。服务器部署应直接将仓库克隆到最终路径 `/opt/github-trending-daily`，并在该路径创建虚拟环境；不要搬迁已经创建的 `.venv`。以有 `sudo` 权限的用户操作：
 
 ```sh
+sudo git clone https://github.com/Rorsker/github-trending-daily.git /opt/github-trending-daily
+sudo python3 -m venv /opt/github-trending-daily/.venv
+sudo /opt/github-trending-daily/.venv/bin/python -m pip install -r /opt/github-trending-daily/requirements.txt
 sudo useradd --system --home /var/lib/github-trending-daily --shell /usr/sbin/nologin github-trending
 sudo install -d -m 700 /etc/github-trending-daily
-sudo install -m 600 .env.example /etc/github-trending-daily/env
+sudo install -m 600 /opt/github-trending-daily/.env.example /etc/github-trending-daily/env
 sudoedit /etc/github-trending-daily/env
-sudo install -m 644 deploy/github-trending-daily.service /etc/systemd/system/
-sudo install -m 644 deploy/github-trending-daily.timer /etc/systemd/system/
+sudo install -m 644 /opt/github-trending-daily/deploy/github-trending-daily.service /etc/systemd/system/
+sudo install -m 644 /opt/github-trending-daily/deploy/github-trending-daily.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl start github-trending-daily.service
 sudo systemctl enable --now github-trending-daily.timer
