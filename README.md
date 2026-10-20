@@ -1,83 +1,61 @@
 # GitHub Trending 中文日报
 
-使用 Python 标准库采集 GitHub Trending daily，优先关注 AI Agent、开发工具、Skills / 插件与模型基础设施，通过 Codex CLI 或 JSON 导入生成中文 Markdown 日报。
+独立 Python 3.12+ 项目。每日采集 GitHub Trending，使用 DeepSeek API 对尚未收录的仓库生成中文介绍与关注理由，保存 Markdown 报告，并可通过 AstrBot OpenAPI 推送到 QQ 群。无需 Codex CLI、Docker 或第三方 Python 包。
 
-## 功能
+## 安装
 
-- 实时采集并归档原始页面、观察快照和内容哈希，保留页面排名及可见指标。
-- 每期目标 8 个新项目；不足 8 个时按实际数量生成，已收录仓库按 owner/repo 不区分大小写永久去重。
-- 日报只包含日期标题、项目名称与 GitHub 链接、Trending 排名、Stars、Forks、今日新增星标、功能简介和推荐理由，不出现星号字符。
-- 分析元数据、来源证据与回执独立归档，不进入读者版 Markdown。
-- Codex 与 JSON 导入使用相同校验；没有新候选时返回 no-new-projects，不调用模型或生成重复日报。
-
-## 环境
-
-Python 3.12 或以上，无第三方 Python 依赖。默认分析后端需要在 PATH 中可用、已完成认证的 Codex CLI；使用 JSON 导入后端不需要 Codex。Windows 可通过 run_once.ps1 启动，Python 入口也可直接运行。
-
-## 实时生成
-
-从项目目录运行，日期目录应对应北京时间当日；下面日期仅为命令示例：
-
-```powershell
-python -B ./trending.py run --output-dir ./output/2026-10-19 --timeout 180
+```sh
+git clone https://github.com/Rorsker/github-trending-daily.git
+cd github-trending-daily
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
 ```
 
-可用 --model 指定模型；省略时使用 CLI 默认模型。timeout 分别约束 HTTP 与模型阶段，而不是整条流水线的总耗时。成功时 stdout 返回包含 snapshot、report、analysis 绝对路径的 JSON。诊断输出到 stderr。
+编辑 `.env`，至少填写 `DEEPSEEK_API_KEY`。`.env` 是配置模板，不会由程序自动读取；手动运行前用 `set -a; . ./.env; set +a` 加载，或由 systemd 的 `EnvironmentFile` 加载。Key 不写入命令参数和日志。DeepSeek 模型默认 `deepseek-chat`，可用 `DEEPSEEK_MODEL` 指定。
 
-日常运行必须沿用同一个输出根目录；日期子目录采用 YYYY-MM-DD，以跨天共享历史。已有日报用户应继续使用原输出根目录，不要通过换目录清空去重历史。
+## 运行
 
-## 分离采集与分析
-
-仅采集实时页面：
-
-```powershell
-python -B ./trending.py collect --output-dir ./output/2026-10-19
+```sh
+set -a; . ./.env; set +a
+python daily.py
+python -m unittest -q
 ```
 
-针对已保存的 snapshot 使用 Codex 分析，不重复联网采集：
+`daily.py` 按北京时间确定日期，输出到 `TRENDING_OUTPUT_ROOT/YYYY-MM-DD/`。缺省根目录是当前目录的 `data/`。报告位于 `reports/<分析身份>/report.md`；同时保留原始 HTML、快照、分析 JSON、清单与诊断记录。当天重跑会复用已有有效报告，成功推送的同一日报不会重复发送。无新仓库时返回 `no-new-projects`，不生成重复日报。
 
-```powershell
-python -B ./trending.py analyze --snapshot ./output/2026-10-19/snapshots/SNAPSHOT.json --output-dir ./output/2026-10-19 --timeout 180
+可单独运行 `python trending.py collect --output-dir data/YYYY-MM-DD` 采集，或 `python trending.py analyze --snapshot <snapshot.json> --output-dir data/YYYY-MM-DD` 分析。离线验证可使用 `--backend json --analysis-file <analysis.json>`；导入内容仍受来源、中文字段及历史去重校验。
+
+采集的是 GitHub Trending 滚动页面在执行时的观察，不是可回溯的官方历史榜单。Stars 等指标只代表采集时页面展示的值。已入选仓库按 owner/repo 永久去重；因此应备份整个 `data/`，不要清空历史来补数据。
+
+## Linux 定时运行
+
+示例单元在 `deploy/`。朋友需要先获得该 Private 仓库的读取权限。以有 `sudo` 权限的用户操作，完成上述安装后，将仓库放在 `/opt/github-trending-daily`，并执行：
+
+```sh
+sudo useradd --system --home /var/lib/github-trending-daily --shell /usr/sbin/nologin github-trending
+sudo install -d -m 700 /etc/github-trending-daily
+sudo install -m 600 .env.example /etc/github-trending-daily/env
+sudoedit /etc/github-trending-daily/env
+sudo install -m 644 deploy/github-trending-daily.service /etc/systemd/system/
+sudo install -m 644 deploy/github-trending-daily.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl start github-trending-daily.service
+sudo systemctl enable --now github-trending-daily.timer
 ```
 
-也可由外部程序生成分析 JSON，通过已有接口导入：
+在私有环境文件中填写 DeepSeek Key，并将 `TRENDING_OUTPUT_ROOT` 设为 `/var/lib/github-trending-daily`。确认 `github-trending` 用户能读取 `/opt/github-trending-daily` 和其中的虚拟环境。`StateDirectory` 为服务用户建立可写的数据目录。
 
-```json
-{"items":[{"name":"owner/repo","summary_zh":"根据采集描述概括功能。","reason_zh":"说明关注理由，不宣称未经验证的能力。"}]}
-```
+timer 使用 `Asia/Shanghai` 明确指定北京时间每天 09:00，与服务器本地时区无关。`Persistent=true` 会在机器错过计划时间后补跑；日报日期按实际北京时间计算，不伪造历史榜单日期。查看 `systemctl status github-trending-daily.service` 和 `journalctl -u github-trending-daily.service`。
 
-```powershell
-python -B ./trending.py analyze --snapshot ./output/2026-10-19/snapshots/SNAPSHOT.json --output-dir ./output/2026-10-19 --backend json --analysis-file ./analysis.json
-```
+AstrBot 参数和版本核对见 [docs/astrbot.md](docs/astrbot.md)。不配置 AstrBot 时，日报生成照常完成，不会发送消息。
 
-将 SNAPSHOT.json 和 owner/repo 替换为真实快照文件名与该快照中尚未收录的仓库。输入必须包含 1–8 个不同项目，两个文本字段均含中文；未知项目、历史项目、重复名称、额外字段及无效 JSON 会被拒绝。结构见 analysis.schema.json。
+## 组成
 
-## 数据与历史
+- `trending.py`：原有的采集、解析、快照校验、永久去重、报告渲染与归档；分析后端改为 DeepSeek HTTP API。
+- `daily.py`：单次无人值守执行、当日缓存与可选发送。
+- `astrbot_delivery.py`：独立 AstrBot OpenAPI 发送与本地防重回执。
+- `test_trending.py`、`test_delivery.py`：离线测试，不使用真实 API Key。
 
-输出包括 raw、snapshots、content、reports、receipts、logs 和锁文件；这些都是本地运行数据，不应提交到 Git。reports 下每份完整报告包含 report.md、analysis.json 和 manifest.json。缓存会校验报告及分析内容，复用同一份成功缓存只返回原文件，不算生成另一份日报。
-
-历史从最终 github-trending-YYYY-MM-DD.md，以及带 no-repeat-v1 标记的成功报告归档读取。启用去重前未采用的分析草稿不计入历史。只过滤分析候选，不修改原始快照或重排来源排名。请保留历史日报和归档。
-
-GitHub daily 是滚动视图，不提供可核实的官方历史榜单日期。Stars 和新增星标只代表采集时点的页面值；缺失或缩写指标记为 null，不猜测为零。功能简介限于捕获的仓库自述，推荐理由属于 AI 判断，项目不下载 README 或实测仓库能力。
-
-仓库文本作为不可信输入处理；Codex 提示禁止工具、命令和文件访问，仅传入公开仓库字段。分析子进程采用只读沙箱，产品不保存完整 CLI 会话或认证信息。
-
-## 离线验证
-
-```powershell
-python -B -m unittest -v
-```
-
-测试使用公开仓库字段归一化的 HTML fixture、合成输入和 mock，不访问实时 GitHub 或模型服务。fixture 是离线样例，不代表当日榜单；上游 JSON 样例仅用于核对仓库名称，指标以 HTML fixture 为准。
-
-## PowerShell 入口
-
-```powershell
-./run_once.ps1 -OutputDir ./output/2026-10-19 -TimeoutSeconds 180
-```
-
-支持 -Backend json、-AnalysisFile、-Model 与 -Python。项目不创建定时任务、不发送消息，也不自动发布日报。错误和锁恢复见 RUNBOOK.md，格式和协作约定见 AGENTS.md。
-
-## 许可证
-
-MIT，见 LICENSE。
+MIT 许可，见 `LICENSE`。

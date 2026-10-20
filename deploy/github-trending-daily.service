@@ -1,0 +1,13 @@
+[Unit]
+Description=GitHub Trending Chinese daily report
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=github-trending
+WorkingDirectory=/opt/github-trending-daily
+EnvironmentFile=/etc/github-trending-daily/env
+StateDirectory=github-trending-daily
+ExecStart=/opt/github-trending-daily/.venv/bin/python /opt/github-trending-daily/daily.py
+TimeoutStartSec=15min

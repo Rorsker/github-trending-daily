@@ -130,9 +130,14 @@ class ProductTests(unittest.TestCase):
         self.assertNotIn(self.data['content_sha256'],text)
         self.assertNotIn('仓库来源事实',text)
         self.assertNotIn(chr(42),text)
+        self.assertNotIn(chr(35),text)
+        self.assertTrue(text.startswith('GitHub Trending 中文日报｜'))
+        self.assertIn('项目介绍：',text)
+        self.assertNotIn('功能简介：',text)
+        self.assertNotIn('推荐理由：',text)
         self.assertIn('Trending 排名：',text)
         self.assertIn('今日新增星标（页面值）：',text)
-        with patch.object(t,'codex_analysis',side_effect=AssertionError('unexpected call')):
+        with patch.object(t,'deepseek_analysis',side_effect=AssertionError('unexpected call')):
             self.assertEqual((report,analysis),t.analyze(self.snapshot,self.out,'json',self.import_file))
         self.value['items'][0]['reason_zh']='判断已经改变。'
         self.write_import()
@@ -142,20 +147,21 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(original,self.snapshot.read_bytes())
         self.assertEqual(raw,(self.out/self.data['raw_html']).read_bytes())
         remaining = {'items':[dict(name=r['name'],summary_zh='来源描述摘要。',reason_zh='值得关注。') for r in self.data['repositories'][5:10]]}
-        with patch.object(t,'codex_analysis',return_value=remaining) as backend:
-            real,_ = t.analyze(self.snapshot,self.out,'codex',model='test-model')
+        with patch.object(t,'deepseek_analysis',return_value=remaining) as backend:
+            real,_ = t.analyze(self.snapshot,self.out,'deepseek',model='test-model')
             self.assertEqual(backend.call_count,1)
             offered = backend.call_args.args[0]['repositories']
             self.assertFalse({r['name'] for r in offered} & {i['name'] for i in self.value['items']})
-            self.assertEqual(t.load(real.parent/'manifest.json')['identity']['backend'],'codex')
-            self.assertEqual(real,t.analyze(self.snapshot,self.out,'codex',model='test-model')[0])
+            self.assertEqual(t.load(real.parent/'manifest.json')['identity']['backend'],'deepseek')
+            self.assertEqual(real,t.analyze(self.snapshot,self.out,'deepseek',model='test-model')[0])
             self.assertEqual(backend.call_count,1)
 
-    def test_escape_analysis_and_remove_asterisks(self):
+    def test_escape_analysis_and_remove_asterisks_and_hashes(self):
         value = copy.deepcopy(self.value)
         value['items'][0]['summary_zh']='摘要：</p>\n# Injected [click](javascript:alert(1)) <script>x</script> **内容**'
+        value['items'][0]['reason_zh']='判断：#值得关注。'
         result = t.render(self.data,self.snapshot,value,'json-import')
-        self.assertNotIn('\n# Injected',result)
+        self.assertNotIn(chr(35),result)
         self.assertNotIn('<script>',result)
         self.assertIn('&lt;script&gt;',result)
         self.assertIn('\\[click\\]',result)
@@ -172,8 +178,8 @@ class ProductTests(unittest.TestCase):
         with self.assertRaisesRegex(t.BriefingError,'schema'):
             t.analyze(second_snapshot,current,'json',self.import_file)
         remaining = {'items':[dict(name=r['name'],summary_zh='新项目简介。',reason_zh='值得关注。') for r in self.data['repositories'][5:]]}
-        with patch.object(t,'codex_analysis',return_value=remaining) as backend:
-            report,_ = t.analyze(second_snapshot,current,'codex')
+        with patch.object(t,'deepseek_analysis',return_value=remaining) as backend:
+            report,_ = t.analyze(second_snapshot,current,'deepseek')
         self.assertEqual([r['name'] for r in backend.call_args.args[0]['repositories']], [r['name'] for r in self.data['repositories'][5:]])
         self.assertEqual(len(t.published_names(current)),len(self.data['repositories']))
         self.assertEqual(second_snapshot.read_bytes(),original)
@@ -185,10 +191,11 @@ class ProductTests(unittest.TestCase):
         previous, current = root/'2026-10-18', root/'2026-10-19'
         previous.mkdir(parents=True)
         headings = [f'## {i}. [{r["name"]}](https://github.com/{r["name"].upper()})' for i,r in enumerate(self.data['repositories'][:-1],1)]
+        headings[-1] = headings[-1].removeprefix('## ')
         (previous/'github-trending-2026-10-18.md').write_text('\n\n'.join(headings),encoding='utf-8')
         draft = previous/'reports'/'old-draft'
         draft.mkdir(parents=True)
-        t.save(draft/'manifest.json',{'identity':{'backend':'codex'}})
+        t.save(draft/'manifest.json',{'identity':{'backend':'deepseek'}})
         t.save(draft/'analysis.json',{'items':[{'name':self.data['repositories'][-1]['name']}]})
         self.assertEqual(len(t.published_names(current)),len(self.data['repositories'])-1)
         snapshot = t.collect(current,FIX/'trending.html')
@@ -198,13 +205,13 @@ class ProductTests(unittest.TestCase):
         report,_ = t.analyze(snapshot,current,'json',imported)
         self.assertEqual(len(t.load(report.parent/'analysis.json')['items']),1)
         exhausted = t.collect(root/'2026-10-20',FIX/'trending.html')
-        with patch.object(t,'codex_analysis') as backend, self.assertRaisesRegex(t.BriefingError,'no-new-projects'):
+        with patch.object(t,'deepseek_analysis') as backend, self.assertRaisesRegex(t.BriefingError,'no-new-projects'):
             t.analyze(exhausted,root/'2026-10-20')
         backend.assert_not_called()
         self.assertFalse((root/'history.lock').exists())
 
     def test_model_schema_failure_no_report_and_receipt(self):
-        with patch.object(t,'codex_analysis',return_value={'items':[]}):
+        with patch.object(t,'deepseek_analysis',return_value={'items':[]}):
             with self.assertRaisesRegex(t.BriefingError,'schema'):
                 t.analyze(self.snapshot,self.out)
         self.assertFalse(list((self.out/'reports').glob('*/report.md')) if (self.out/'reports').exists() else [])
@@ -228,30 +235,25 @@ class ProductTests(unittest.TestCase):
         proc=subprocess.run([sys.executable,'-B',str(t.ROOT/'trending.py'),'collect','--output-dir',str(self.out),'--html-file',str(FIX/'trending.html')],cwd=self.temp.name,capture_output=True,encoding='utf-8')
         self.assertEqual(proc.returncode,0,proc.stderr)
         self.assertTrue(Path(json.loads(proc.stdout)['snapshot']).is_absolute())
-    def test_codex_argv_prompt_and_timeout(self):
-        class Fake:
-            returncode=0
-            def communicate(inner,prompt,timeout):
-                self.assertNotIn(str(self.snapshot).encode(),prompt)
-                self.assertNotIn(b'<article',prompt)
-                self.assertIn(b'NO tools',prompt)
-                Path(self.final).write_text(json.dumps(self.value),encoding='utf-8')
-        def launch(args,**kwargs):
-            self.final=args[args.index('--output-last-message')+1]
-            self.assertIn('--ephemeral',args)
-            self.assertEqual(args[args.index('--sandbox')+1],'read-only')
-            self.assertFalse(kwargs.get('shell',False))
-            return Fake()
-        with patch.object(t.shutil,'which',return_value='codex'),patch.object(t.subprocess,'Popen',side_effect=launch),patch.object(t,'attach_job'),patch.object(t,'close_job'),patch.object(t.tempfile,'TemporaryDirectory',side_effect=external_tempdir):
-            receipt={}
-            self.assertEqual(t.codex_analysis(self.data,None,5,receipt),self.value)
-        fake=unittest.mock.Mock()
-        fake.communicate.side_effect=subprocess.TimeoutExpired('codex',.01)
-        fake.returncode=-9
-        with patch.object(t.shutil,'which',return_value='codex'),patch.object(t.subprocess,'Popen',return_value=fake),patch.object(t,'terminate_tree') as kill,patch.object(t,'attach_job'),patch.object(t.tempfile,'TemporaryDirectory',side_effect=external_tempdir):
-            with self.assertRaisesRegex(t.BriefingError,'timeout'):
-                t.codex_analysis(self.data,None,.01,{})
-            kill.assert_called_once_with(fake)
+    def test_deepseek_request_and_invalid_json(self):
+        response = unittest.mock.MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.read.return_value = json.dumps({'choices':[{'finish_reason':'stop','message':{'content':json.dumps(self.value)}}]}).encode()
+        with patch.dict(os.environ, {'DEEPSEEK_API_KEY':'test-key'}), patch.object(t.urllib.request,'urlopen',return_value=response) as send:
+            receipt = {}
+            self.assertEqual(t.deepseek_analysis(self.data,'deepseek-chat',7,receipt),self.value)
+        request = send.call_args.args[0]
+        payload = json.loads(request.data)
+        self.assertEqual(request.full_url,'https://api.deepseek.com/chat/completions')
+        self.assertEqual(payload['response_format'],{'type':'json_object'})
+        self.assertNotIn(str(self.snapshot),json.dumps(payload))
+        self.assertNotIn('<article',json.dumps(payload))
+        self.assertEqual(send.call_args.kwargs['timeout'],7)
+        response.read.return_value = b'{invalid'
+        with patch.dict(os.environ, {'DEEPSEEK_API_KEY':'test-key'}), patch.object(t.urllib.request,'urlopen',return_value=response):
+            with self.assertRaisesRegex(t.BriefingError,'model-json'):
+                t.deepseek_analysis(self.data,None,7,{})
     def test_full_run_offline_network_adapter(self):
         response=unittest.mock.MagicMock()
         response.__enter__.return_value=response
@@ -272,17 +274,6 @@ class ProductTests(unittest.TestCase):
         data['repositories'][0]['description']='modified'
         with self.assertRaisesRegex(t.BriefingError,'content_sha256'):
             t.validate_snapshot(data)
-    def test_codex_invalid_final_json(self):
-        class Fake:
-            returncode=0
-            def communicate(inner,prompt,timeout):
-                Path(self.final).write_text('{invalid',encoding='utf-8')
-        def launch(args,**kwargs):
-            self.final=args[args.index('--output-last-message')+1]
-            return Fake()
-        with patch.object(t.shutil,'which',return_value='codex'),patch.object(t.subprocess,'Popen',side_effect=launch),patch.object(t,'attach_job'),patch.object(t,'close_job'),patch.object(t.tempfile,'TemporaryDirectory',side_effect=external_tempdir):
-            with self.assertRaisesRegex(t.BriefingError,'model-json'):
-                t.codex_analysis(self.data,None,3,{})
     def test_cache_tamper_rejected(self):
         report, _ = t.analyze(self.snapshot,self.out,'json',self.import_file)
         report.write_text('tampered',encoding='utf-8')
@@ -306,60 +297,6 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(output.getvalue(),'')
         self.assertEqual(t.load(next((self.out/'logs').glob('*.json')))['kind'],'json')
         self.assertFalse((self.out/'reports').exists())
-    def test_real_child_tree_cleanup(self):
-        marker=Path(self.temp.name)/'child survived.txt'
-        child="import time,pathlib; time.sleep(2); pathlib.Path("+repr(str(marker))+").write_text('bad')"
-        parent="import subprocess,sys,time; subprocess.Popen([sys.executable,'-B','-c',"+repr(child)+"]); print('ready',flush=True); time.sleep(60)"
-        proc=subprocess.Popen([sys.executable,'-B','-c',parent],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=os.name!='nt',creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name=='nt' else 0)
-        t.attach_job(proc)
-        try:
-            self.assertEqual(proc.stdout.readline().strip(),b'ready')
-            t.terminate_tree(proc)
-            self.assertIsNotNone(proc.poll())
-            time.sleep(2.2)
-            self.assertFalse(marker.exists())
-        finally:
-            if proc.poll() is None: t.terminate_tree(proc)
-            proc.stdout.close()
-    @unittest.skipUnless(os.name=='nt','PowerShell wrapper')
-    def test_powershell_success_failure_with_shim(self):
-        shim=Path(self.temp.name)/'python shim.ps1'
-        shim.write_text("[Console]::Out.WriteLine('{\"snapshot\":\"ok\",\"report\":\"ok\",\"analysis\":\"ok\"}'); exit 0",encoding='utf-8')
-        args=['powershell','-NoProfile','-ExecutionPolicy','Bypass','-File',str(t.ROOT/'run_once.ps1'),'-OutputDir',str(self.out),'-Python',str(shim)]
-        proc=subprocess.run(args,cwd=self.temp.name,capture_output=True,encoding='utf-8')
-        self.assertEqual(proc.returncode,0,proc.stderr)
-        self.assertEqual(json.loads(proc.stdout)['snapshot'],'ok')
-        for failure in ("[Console]::Error.WriteLine('intentional shim failure'); exit 7",
-                        "Write-Error 'intentional shim failure'; exit 7"):
-            with self.subTest(failure=failure):
-                shim.write_text(failure,encoding='utf-8')
-                proc=subprocess.run(args,cwd=self.temp.name,capture_output=True,encoding='utf-8')
-                self.assertEqual(proc.returncode,7,proc.stderr)
-                self.assertIn('intentional shim failure',proc.stderr)
-        # Exercise non-ASCII diagnostics explicitly, independent of host locale.
-        # ASCII PowerShell source also works with Windows PowerShell 5.1's
-        # legacy interpretation of UTF-8 scripts without a BOM.
-        shim.write_text("[Console]::Error.WriteLine(([string][char]0x4e2d)+([char]0x6587)); exit 9",encoding='utf-8')
-        proc=subprocess.run(args,cwd=self.temp.name,capture_output=True,encoding='utf-8')
-        self.assertEqual(proc.returncode,9,proc.stderr)
-        self.assertIn('\u4e2d\u6587',proc.stderr)
-        args[-1]=str(Path(self.temp.name)/'missing python.exe')
-        proc=subprocess.run(args,cwd=self.temp.name,capture_output=True,encoding='utf-8')
-        self.assertEqual(proc.returncode,1)
-        self.assertTrue(proc.stderr.strip())
-
-    @unittest.skipUnless(os.name=='nt','PowerShell wrapper')
-    def test_powershell_native_failure_redirected_stderr(self):
-        shim=Path(self.temp.name)/'native python shim.cmd'
-        shim.write_text('@echo off\necho intentional native failure 1>&2\nexit /b 7\n',encoding='utf-8')
-        def quote(value):
-            return "'"+str(value).replace("'", "''")+"'"
-        # A caller may merge stderr (as schedulers and diagnostic hosts do).
-        # Windows PowerShell then turns native stderr into ErrorRecord objects.
-        command="& "+quote(t.ROOT/'run_once.ps1')+" -OutputDir "+quote(self.out)+" -Python "+quote(shim)+" 2>&1; exit $LASTEXITCODE"
-        proc=subprocess.run(['powershell','-NoProfile','-ExecutionPolicy','Bypass','-Command',command],cwd=self.temp.name,capture_output=True,encoding='utf-8')
-        self.assertEqual(proc.returncode,7,proc.stdout+proc.stderr)
-        self.assertIn('intentional native failure',proc.stdout+proc.stderr)
 
 if __name__=='__main__':
     unittest.main()

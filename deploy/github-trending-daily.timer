@@ -1,0 +1,11 @@
+[Unit]
+Description=Run GitHub Trending daily at 09:00 Beijing time
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=0
+Unit=github-trending-daily.service
+
+[Install]
+WantedBy=timers.target
