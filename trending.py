@@ -411,7 +411,7 @@ def published_names(output_dir):
         seen.update(name.casefold() for name in heading.findall(text))
     for manifest in root.glob('**/reports/*/manifest.json'):
         metadata = load(manifest)
-        if metadata.get('identity', {}).get('publication_policy') != 'no-repeat-v1':
+        if metadata.get('history_exempt') is True or metadata.get('identity', {}).get('publication_policy') != 'no-repeat-v1':
             continue
         value = load(manifest.parent / 'analysis.json')
         if not isinstance(value, dict) or not isinstance(value.get('items'), list):

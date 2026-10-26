@@ -210,6 +210,18 @@ class ProductTests(unittest.TestCase):
         self.assertTrue(report.exists())
         self.assertFalse((root/'history.lock').exists())
 
+    def test_history_exempt_manifest_skips_deduplication(self):
+        root = Path(self.temp.name) / 'daily'
+        previous = root / '2026-10-18'
+        snapshot = t.collect(previous, FIX / 'trending.html')
+        report, _ = t.analyze(snapshot, previous, 'json', self.import_file)
+        manifest_path = report.parent / 'manifest.json'
+        manifest = t.load(manifest_path)
+        manifest['history_exempt'] = True
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        self.assertTrue(report.exists())
+        self.assertEqual(t.published_names(root / '2026-10-19'), set())
+
     def test_final_reader_history_single_candidate_and_exhaustion(self):
         root = Path(self.temp.name)/'daily'
         previous, current = root/'2026-10-18', root/'2026-10-19'
