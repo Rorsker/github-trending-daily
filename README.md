@@ -43,7 +43,7 @@ python -B ./trending.py analyze --snapshot ./output/2026-10-19/snapshots/SNAPSHO
 也可由外部程序生成分析 JSON，通过已有接口导入：
 
 ```json
-{"items":[{"name":"owner/repo","summary_zh":"根据采集描述具体说明用途、适用场景和来源明确支持的功能；资料不足时说明限制。","reason_zh":"简述值得关注的理由，不重复功能描述或宣称未经验证的能力。"}]}
+{"items":[{"name":"owner/repo","summary_zh":"说明项目的目的、适用场景、具体功能以及用户如何使用这些功能达成结果。","reason_zh":"解释所解决的工作流痛点，以及采用该项目后任务为何更易完成。"}]}
 ```
 
 ```powershell

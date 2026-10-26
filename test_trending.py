@@ -72,7 +72,7 @@ class ProductTests(unittest.TestCase):
         self.out = Path(self.temp.name) / 'output with spaces'
         self.snapshot = t.collect(self.out, FIX/'trending.html')
         self.data = t.load(self.snapshot)
-        self.value = {'items':[dict(name=r['name'],summary_zh='来源描述摘要，尚未验证。',reason_zh='判断：值得关注。') for r in self.data['repositories'][:5]]}
+        self.value = {'items':[dict(name=r['name'],summary_zh='围绕项目功能整理工作流程。',reason_zh='帮助使用者集中处理相关任务。') for r in self.data['repositories'][:5]]}
         self.import_file = Path(self.temp.name)/'import.json'
         self.write_import()
     def write_import(self):
@@ -116,6 +116,27 @@ class ProductTests(unittest.TestCase):
         for value in invalid:
             with self.subTest(value=value),self.assertRaises(t.BriefingError):
                 t.validate_analysis(value,self.data)
+    def test_editorial_rejects_meta_and_absence_in_both_fields(self):
+        self.assertEqual(t.validate_editorial(self.value),self.value)
+        for phrase in ('DATA 未说明', 'source_records', '没有', '缺少', '暂无', '未知', '未给出', '信息不足', '尚未验证', '描述仅说明'):
+            for key in ('summary_zh', 'reason_zh'):
+                value=copy.deepcopy(self.value)
+                value['items'][0][key]='帮助整理项目功能。'+phrase
+                with self.subTest(phrase=phrase,key=key),self.assertRaisesRegex(t.BriefingError,'editorial'):
+                    t.validate_editorial(value)
+    def test_model_editorial_retry_and_fail_closed(self):
+        rejected=copy.deepcopy(self.value)
+        rejected['items'][0]['summary_zh']='DATA 未说明具体路径。'
+        with patch.object(t,'codex_analysis',side_effect=[rejected,self.value]) as backend:
+            report,_=t.analyze(self.snapshot,self.out,'codex')
+        self.assertEqual(backend.call_count,2)
+        self.assertNotIn('DATA',report.read_text(encoding='utf-8'))
+        failed_out=Path(self.temp.name)/'failed'
+        other=t.collect(failed_out,FIX/'trending.html')
+        with patch.object(t,'codex_analysis',return_value=rejected) as backend,self.assertRaisesRegex(t.BriefingError,'editorial'):
+            t.analyze(other,failed_out,'codex')
+        self.assertEqual(backend.call_count,2)
+        self.assertFalse(list((failed_out/'reports').glob('*/manifest.json')))
     def test_json_cache_provenance_and_no_snapshot_mutation(self):
         original = self.snapshot.read_bytes()
         raw = (self.out/self.data['raw_html']).read_bytes()
@@ -146,7 +167,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(first,report.read_bytes())
         self.assertEqual(original,self.snapshot.read_bytes())
         self.assertEqual(raw,(self.out/self.data['raw_html']).read_bytes())
-        remaining = {'items':[dict(name=r['name'],summary_zh='来源描述摘要。',reason_zh='值得关注。') for r in self.data['repositories'][5:10]]}
+        remaining = {'items':[dict(name=r['name'],summary_zh='用于整理项目内容的具体流程。',reason_zh='帮助使用者集中处理相关任务。') for r in self.data['repositories'][5:10]]}
         with patch.object(t,'codex_analysis',return_value=remaining) as backend:
             real,_ = t.analyze(self.snapshot,self.out,'codex',model='test-model')
             self.assertEqual(backend.call_count,1)
@@ -242,6 +263,8 @@ class ProductTests(unittest.TestCase):
                 self.assertNotIn(str(self.snapshot).encode(),prompt)
                 self.assertNotIn(b'<article',prompt)
                 self.assertIn(b'NO tools',prompt)
+                self.assertIn(b'previous workflow',prompt)
+                self.assertIn(b'SOURCE_RECORDS',prompt)
                 Path(self.final).write_text(json.dumps(self.value),encoding='utf-8')
         def launch(args,**kwargs):
             self.final=args[args.index('--output-last-message')+1]
