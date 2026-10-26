@@ -19,7 +19,7 @@ class DeliveryTests(unittest.TestCase):
         self.credentials = Credentials("cli_app", "secret", "ou_person")
 
     @patch("send_report.send_text")
-    @patch("send_report.Credentials.from_store")
+    @patch("send_report.load_credentials")
     def test_chunks_are_complete_ordered_and_deduplicated(self, stored, send):
         stored.return_value = self.credentials
         text = "甲" * 3001 + "乙" * 3000 + "终"
@@ -36,7 +36,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(receipt["message_ids"], ["m0", "m1", "m2"])
 
     @patch("send_report.send_text")
-    @patch("send_report.Credentials.from_store")
+    @patch("send_report.load_credentials")
     def test_legacy_success_receipt_skips_send(self, stored, send):
         stored.return_value = self.credentials
         self.report.write_text("日报", encoding="utf-8")
@@ -51,7 +51,7 @@ class DeliveryTests(unittest.TestCase):
         send.assert_not_called()
 
     @patch("send_report.send_text", side_effect=FeishuError("network unknown"))
-    @patch("send_report.Credentials.from_store")
+    @patch("send_report.load_credentials")
     def test_ambiguous_failure_cannot_auto_retry(self, stored, send):
         stored.return_value = self.credentials
         self.report.write_text("日报", encoding="utf-8")

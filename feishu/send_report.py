@@ -14,6 +14,10 @@ from feishu_notifier import Credentials, FeishuError, send_text
 CHUNK_SIZE = 3000
 
 
+def load_credentials() -> Credentials:
+    return Credentials.from_store() if os.name == "nt" else Credentials.from_environment()
+
+
 def write_json(path: Path, value: dict) -> None:
     temporary = path.with_name(path.name + ".tmp")
     try:
@@ -29,7 +33,7 @@ def deliver(report: Path, state_dir: Path) -> dict:
     text = raw.decode("utf-8-sig")
     if not text.strip():
         raise ValueError("日报为空")
-    credentials = Credentials.from_store() if os.name == "nt" else Credentials.from_environment()
+    credentials = load_credentials()
     report_hash = hashlib.sha256(raw).hexdigest()
     recipient_hash = hashlib.sha256(credentials.open_id.encode("utf-8")).hexdigest()
     state_dir.mkdir(parents=True, exist_ok=True)
