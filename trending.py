@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -463,10 +464,13 @@ def _analyze(snapshot_file, output_dir, backend='codex', analysis_file=None, mod
         if not candidates['repositories']:
             raise BriefingError('no-new-projects', 'all collected repositories have already appeared; no new report generated')
         try:
-            # A model may echo source/meta phrasing despite the prompt. Regenerate
-            # once without weakening the rule; never publish a failing response.
-            attempts = 1 if imported is not None else 2
-            for attempt in range(attempts):
+            # Give the model a preparation window to revise editorial mistakes.
+            # The 09:00 send run can try again when no report was published.
+            retry_seconds = int(os.environ.get('TRENDING_EDITORIAL_RETRY_SECONDS', '1500'))
+            if retry_seconds < 0:
+                raise BriefingError('editorial', 'invalid editorial retry window')
+            deadline = time.monotonic() + retry_seconds
+            while True:
                 value = imported if imported is not None else codex_analysis(candidates, model, timeout, receipt)
                 # Imports and model responses must both select only never-featured names.
                 value = validate_analysis(value, candidates)
@@ -474,8 +478,9 @@ def _analyze(snapshot_file, output_dir, backend='codex', analysis_file=None, mod
                     validate_editorial(value)
                     break
                 except BriefingError:
-                    if attempt + 1 == attempts:
+                    if imported is not None or time.monotonic() >= deadline:
                         raise
+                    time.sleep(3)
         finally:
             receipt['finished_at'] = now()
             save(out / 'receipts' / f'{uuid.uuid4().hex}.json', receipt)

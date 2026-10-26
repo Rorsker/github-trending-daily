@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parent
 ZONE = dt.timezone(dt.timedelta(hours=8))
@@ -34,6 +35,18 @@ def existing_report(day_dir: Path, day: str) -> Path | None:
     return None
 
 
+def wait_for_generation(day_dir: Path, day: str) -> Path | None:
+    deadline = time.monotonic() + 1800
+    while (day_dir / 'run.lock').exists():
+        report = existing_report(day_dir, day)
+        if report is not None:
+            return report
+        if time.monotonic() >= deadline:
+            raise RuntimeError('generation is still running after delivery wait window')
+        time.sleep(10)
+    return existing_report(day_dir, day)
+
+
 def run_child(command: list[str], stdout_path: Path, stderr_path: Path) -> dict:
     with stdout_path.open('w', encoding='utf-8') as stdout, stderr_path.open('w', encoding='utf-8') as stderr:
         result = subprocess.run(command, cwd=ROOT, stdout=stdout, stderr=stderr, check=False)
@@ -55,7 +68,7 @@ def main() -> int:
     stage = 'discover'
     try:
         write_status(status_path, {'date': day, 'status': 'running', 'stage': stage})
-        report = existing_report(day_dir, day)
+        report = wait_for_generation(day_dir, day) if args.send else existing_report(day_dir, day)
         if report is None:
             stage = 'generation'
             write_status(status_path, {'date': day, 'status': 'running', 'stage': stage})

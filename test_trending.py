@@ -127,15 +127,15 @@ class ProductTests(unittest.TestCase):
     def test_model_editorial_retry_and_fail_closed(self):
         rejected=copy.deepcopy(self.value)
         rejected['items'][0]['summary_zh']='DATA 未说明具体路径。'
-        with patch.object(t,'codex_analysis',side_effect=[rejected,self.value]) as backend:
+        with patch.object(t,'codex_analysis',side_effect=[rejected,rejected,self.value]) as backend,patch.object(t.time,'sleep'):
             report,_=t.analyze(self.snapshot,self.out,'codex')
-        self.assertEqual(backend.call_count,2)
+        self.assertEqual(backend.call_count,3)
         self.assertNotIn('DATA',report.read_text(encoding='utf-8'))
         failed_out=Path(self.temp.name)/'failed'
         other=t.collect(failed_out,FIX/'trending.html')
-        with patch.object(t,'codex_analysis',return_value=rejected) as backend,self.assertRaisesRegex(t.BriefingError,'editorial'):
+        with patch.object(t,'codex_analysis',return_value=rejected) as backend,patch.dict(t.os.environ,{'TRENDING_EDITORIAL_RETRY_SECONDS':'0'}),self.assertRaisesRegex(t.BriefingError,'editorial'):
             t.analyze(other,failed_out,'codex')
-        self.assertEqual(backend.call_count,2)
+        self.assertEqual(backend.call_count,1)
         self.assertFalse(list((failed_out/'reports').glob('*/manifest.json')))
     def test_json_cache_provenance_and_no_snapshot_mutation(self):
         original = self.snapshot.read_bytes()

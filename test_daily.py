@@ -51,6 +51,30 @@ class DailyEntryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'hash mismatch'):
             daily.existing_report(self.root / self.day, self.day)
 
+    def test_delivery_waits_for_in_progress_generation(self):
+        day_dir = self.root / self.day
+        lock = day_dir / 'run.lock'
+        lock.touch()
+        self.report.unlink()
+        manifest = self.report.parent / 'manifest.json'
+        contents = manifest.read_bytes()
+        manifest.unlink()
+        def finish(_):
+            self.report.write_text('GitHub Trending 中文日报', encoding='utf-8')
+            manifest.write_bytes(contents)
+            lock.unlink()
+        with patch.object(daily.time, 'sleep', side_effect=finish):
+            self.assertEqual(daily.wait_for_generation(day_dir, self.day), self.report)
+
+    def test_delivery_wait_has_deadline(self):
+        day_dir = self.root / self.day
+        (day_dir / 'run.lock').touch()
+        self.report.unlink()
+        (self.report.parent / 'manifest.json').unlink()
+        with patch.object(daily.time, 'monotonic', side_effect=[0, 1801]):
+            with self.assertRaisesRegex(RuntimeError, 'still running'):
+                daily.wait_for_generation(day_dir, self.day)
+
 
 if __name__ == '__main__':
     unittest.main()
