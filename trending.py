@@ -308,7 +308,10 @@ def codex_analysis(snapshot, model, timeout, receipt):
         args = [executable, 'exec', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only']
         if os.name == 'nt':
             args += ['-c', 'windows.sandbox="unelevated"']
-        args += ['-c', 'model_reasoning_effort="low"', '-c', 'sandbox_read_only.network_access=false', '-c', 'sandbox_workspace_write.network_access=false', '--output-schema', str(ROOT / 'analysis.schema.json'), '--output-last-message', str(final)]
+        effort = os.environ.get('TRENDING_REASONING_EFFORT', 'low')
+        if effort not in ('low', 'medium', 'high'):
+            raise BriefingError('model', 'invalid TRENDING_REASONING_EFFORT')
+        args += ['-c', f'model_reasoning_effort="{effort}"', '-c', 'sandbox_read_only.network_access=false', '-c', 'sandbox_workspace_write.network_access=false', '--output-schema', str(ROOT / 'analysis.schema.json'), '--output-last-message', str(final)]
         if model:
             args += ['--model', model]
         args += ['-']
