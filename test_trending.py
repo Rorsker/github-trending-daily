@@ -130,6 +130,11 @@ class ProductTests(unittest.TestCase):
         self.assertNotIn(self.data['content_sha256'],text)
         self.assertNotIn('仓库来源事实',text)
         self.assertNotIn(chr(42),text)
+        self.assertNotIn(chr(35),text)
+        self.assertTrue(text.startswith('GitHub Trending 中文日报｜'))
+        self.assertIn('项目介绍：',text)
+        self.assertNotIn('功能简介：',text)
+        self.assertNotIn('推荐理由：',text)
         self.assertIn('Trending 排名：',text)
         self.assertIn('今日新增星标（页面值）：',text)
         with patch.object(t,'codex_analysis',side_effect=AssertionError('unexpected call')):
@@ -151,11 +156,12 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(real,t.analyze(self.snapshot,self.out,'codex',model='test-model')[0])
             self.assertEqual(backend.call_count,1)
 
-    def test_escape_analysis_and_remove_asterisks(self):
+    def test_escape_analysis_and_remove_asterisks_and_hashes(self):
         value = copy.deepcopy(self.value)
         value['items'][0]['summary_zh']='摘要：</p>\n# Injected [click](javascript:alert(1)) <script>x</script> **内容**'
+        value['items'][0]['reason_zh']='判断：#值得关注。'
         result = t.render(self.data,self.snapshot,value,'json-import')
-        self.assertNotIn('\n# Injected',result)
+        self.assertNotIn(chr(35),result)
         self.assertNotIn('<script>',result)
         self.assertIn('&lt;script&gt;',result)
         self.assertIn('\\[click\\]',result)
@@ -185,6 +191,7 @@ class ProductTests(unittest.TestCase):
         previous, current = root/'2026-10-18', root/'2026-10-19'
         previous.mkdir(parents=True)
         headings = [f'## {i}. [{r["name"]}](https://github.com/{r["name"].upper()})' for i,r in enumerate(self.data['repositories'][:-1],1)]
+        headings[-1] = headings[-1].removeprefix('## ')
         (previous/'github-trending-2026-10-18.md').write_text('\n\n'.join(headings),encoding='utf-8')
         draft = previous/'reports'/'old-draft'
         draft.mkdir(parents=True)

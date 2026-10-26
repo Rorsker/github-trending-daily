@@ -1,0 +1,9 @@
+.git
+.venv
+__pycache__
+output
+data
+*.pyc
+.env
+.env.*
+feishu/test_*.py
