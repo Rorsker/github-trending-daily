@@ -124,7 +124,7 @@ class ProductTests(unittest.TestCase):
                 value['items'][0][key]='帮助整理项目功能。'+phrase
                 with self.subTest(phrase=phrase,key=key),self.assertRaisesRegex(t.BriefingError,'editorial'):
                     t.validate_editorial(value)
-    def test_model_editorial_retry_and_fail_closed(self):
+    def test_model_editorial_retry_and_reader_safe_fallback(self):
         rejected=copy.deepcopy(self.value)
         rejected['items'][0]['summary_zh']='DATA 未说明具体路径。'
         with patch.object(t,'codex_analysis',side_effect=[rejected,rejected,self.value]) as backend,patch.object(t.time,'sleep'):
@@ -133,10 +133,13 @@ class ProductTests(unittest.TestCase):
         self.assertNotIn('DATA',report.read_text(encoding='utf-8'))
         failed_out=Path(self.temp.name)/'failed'
         other=t.collect(failed_out,FIX/'trending.html')
-        with patch.object(t,'codex_analysis',return_value=rejected) as backend,patch.dict(t.os.environ,{'TRENDING_EDITORIAL_RETRY_SECONDS':'0'}),self.assertRaisesRegex(t.BriefingError,'editorial'):
-            t.analyze(other,failed_out,'codex')
+        with patch.object(t,'codex_analysis',return_value=rejected) as backend,patch.dict(t.os.environ,{'TRENDING_EDITORIAL_RETRY_SECONDS':'0'}):
+            fallback,_=t.analyze(other,failed_out,'codex')
         self.assertEqual(backend.call_count,1)
-        self.assertFalse(list((failed_out/'reports').glob('*/manifest.json')))
+        self.assertTrue(fallback.exists())
+        self.assertNotIn('DATA',fallback.read_text(encoding='utf-8'))
+        self.assertNotIn('未说明',fallback.read_text(encoding='utf-8'))
+        self.assertFalse(t.EDITORIAL_EXCLUDED.search(t.load(fallback.parent/'analysis.json')['items'][0]['summary_zh']))
     def test_json_cache_provenance_and_no_snapshot_mutation(self):
         original = self.snapshot.read_bytes()
         raw = (self.out/self.data['raw_html']).read_bytes()

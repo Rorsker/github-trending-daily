@@ -23,6 +23,7 @@ SOURCE = 'https://github.com/trending?since=daily'
 ZONE = dt.timezone(dt.timedelta(hours=8))
 ROOT = Path(__file__).resolve().parent
 NAME = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z')
+EDITORIAL_EXCLUDED = re.compile(r'\b(?:DATA|SOURCE_RECORDS)\b|(?:没有|缺少|暂无|未说明|未给出|未知|信息不足|资料不足|未验证|尚未验证|未提供|描述仅说明|来源描述)', re.IGNORECASE)
 
 class BriefingError(Exception):
     def __init__(self, kind, message):
@@ -240,12 +241,30 @@ def validate_analysis(value, snapshot):
     return value
 
 def validate_editorial(value):
-    excluded = re.compile(r'\b(?:DATA|SOURCE_RECORDS)\b|(?:没有|缺少|暂无|未说明|未给出|未知|信息不足|资料不足|未验证|尚未验证|未提供|描述仅说明|来源描述)', re.IGNORECASE)
     for item in value['items']:
         for key in ('summary_zh', 'reason_zh'):
-            if excluded.search(item[key]):
+            if EDITORIAL_EXCLUDED.search(item[key]):
                 raise BriefingError('editorial', f'{key} contains source/meta commentary or negative filler')
     return value
+
+def reader_safe_fallback(value, snapshot):
+    """Keep factual sentences when prose-only revision runs out of time."""
+    descriptions = {r['name']: r['description'] for r in snapshot['repositories']}
+    cleaned = {'items': []}
+    for item in value['items']:
+        result = {'name': item['name']}
+        for key in ('summary_zh', 'reason_zh'):
+            sentences = re.split(r'(?<=[。！？；])', item[key])
+            text = ''.join(s for s in sentences if not EDITORIAL_EXCLUDED.search(s)).strip()
+            if not text:
+                if key == 'summary_zh':
+                    description = descriptions[item['name']]
+                    text = ('该项目聚焦' + description + '。') if description and not EDITORIAL_EXCLUDED.search(description) else '该项目聚焦其仓库展示的主题。'
+                else:
+                    text = '对于关注相关工作流程的读者，这个项目值得进一步评估。'
+            result[key] = text
+        cleaned['items'].append(result)
+    return validate_editorial(cleaned)
 
 def attach_job(proc):
     """Use a Windows kill-on-close job so descendants cannot outlive a timeout."""
@@ -478,8 +497,11 @@ def _analyze(snapshot_file, output_dir, backend='codex', analysis_file=None, mod
                     validate_editorial(value)
                     break
                 except BriefingError:
-                    if imported is not None or time.monotonic() >= deadline:
+                    if imported is not None:
                         raise
+                    if time.monotonic() >= deadline:
+                        value = reader_safe_fallback(value, candidates)
+                        break
                     time.sleep(3)
         finally:
             receipt['finished_at'] = now()
