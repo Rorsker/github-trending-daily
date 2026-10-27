@@ -26,7 +26,7 @@ python -B ./trending.py run --output-dir ./output/2026-10-19 --timeout 180
 
 日常运行必须沿用同一个输出根目录；日期子目录采用 YYYY-MM-DD，以跨天共享历史。已有日报用户应继续使用原输出根目录，不要通过换目录清空去重历史。
 
-Coolify 部署使用两个独立定时任务：服务器调度时区 UTC 下 `30 0 * * *` 开始生成（北京时间 08:30），`30 1 * * *` 执行 `python -B /app/daily.py --send`（北京时间 09:30）。发送入口等待仍在运行的生成任务完成；飞书回执按报告内容去重。模型措辞在生成窗口内可持续重试，窗口结束时清理不适合读者的内部/否定句子，不因单纯的措辞问题取消生成。外部服务故障或没有可选新项目时无法保证准时送达。
+Coolify 部署使用两个独立定时任务：服务器调度时区 UTC 下 `30 0 * * *` 开始生成（北京时间 08:30），`0 1 * * *` 执行 `python -B /app/daily.py --send`（北京时间 09:00）。发送入口等待仍在运行的生成任务完成；飞书回执按报告内容去重。模型措辞在生成窗口内可持续重试，窗口结束时清理不适合读者的内部/否定句子，不因单纯的措辞问题取消生成。外部服务故障或没有可选新项目时无法保证准时送达。
 
 ## 分离采集与分析
 
@@ -82,7 +82,7 @@ python -B -m unittest -v
 
 ## Coolify 容器入口
 
-`Dockerfile` 使用 Python 3.12 与固定版本的 Codex CLI。容器本身只运行轻量等待进程，不自动生成或推送日报；Coolify 的 Scheduled Task 在 UTC 00:30/01:30 分别执行生成与投递，对应北京时间 08:30/09:30。无推送测试使用 `python -B /app/daily.py`。`/data/output` 挂载 Coolify 持久卷，保留既有 `output/` 的完整历史目录。
+`Dockerfile` 使用 Python 3.12 与固定版本的 Codex CLI。容器本身只运行轻量等待进程，不自动生成或推送日报；Coolify 的 Scheduled Task 在 UTC 00:30/01:00 分别执行生成与投递，对应北京时间 08:30/09:00。无推送测试使用 `python -B /app/daily.py`。`/data/output` 挂载 Coolify 持久卷，保留既有 `output/` 的完整历史目录。
 
 在 Coolify 的私密环境变量中配置 `DEEPSEEK_API_KEY`。容器的 Codex CLI 默认使用 `deepseek-flash` 和 `https://api.deepseek.com/` 的 Responses API，可通过 `CODEX_MODEL_NAME`、`CODEX_MODEL_BASE_URL` 覆盖；设置 `TRENDING_REASONING_EFFORT=high` 以提高分析深度。本机 Windows 任务仍沿用本机 Codex 提供方和原推理设置。飞书推送仅在显式传入 `--send` 时启用，Linux 凭据从 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_OPEN_ID` 读取。不得将凭据放入 Git、镜像或日志。
 
