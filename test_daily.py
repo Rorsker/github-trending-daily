@@ -51,6 +51,22 @@ class DailyEntryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'hash mismatch'):
             daily.existing_report(self.root / self.day, self.day)
 
+    def test_exempt_test_report_is_not_selected_for_delivery(self):
+        test_manifest = self.report.parent / 'manifest.json'
+        metadata = json.loads(test_manifest.read_text(encoding='utf-8'))
+        metadata['history_exempt'] = True
+        test_manifest.write_text(json.dumps(metadata), encoding='utf-8')
+        self.assertIsNone(daily.existing_report(self.root / self.day, self.day))
+
+        formal_bundle = self.root / self.day / 'reports' / 'formal'
+        formal_bundle.mkdir()
+        formal_report = formal_bundle / 'report.md'
+        formal_report.write_text('正式日报', encoding='utf-8')
+        metadata.pop('history_exempt')
+        metadata['report_sha256'] = hashlib.sha256(formal_report.read_bytes()).hexdigest()
+        (formal_bundle / 'manifest.json').write_text(json.dumps(metadata), encoding='utf-8')
+        self.assertEqual(daily.existing_report(self.root / self.day, self.day), formal_report)
+
     def test_delivery_waits_for_in_progress_generation(self):
         day_dir = self.root / self.day
         lock = day_dir / 'run.lock'

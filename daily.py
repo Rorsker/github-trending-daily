@@ -26,7 +26,7 @@ def existing_report(day_dir: Path, day: str) -> Path | None:
     for manifest_path in sorted((day_dir / 'reports').glob('*/manifest.json')):
         manifest = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
         identity = manifest.get('identity', {})
-        if identity.get('day') != day or identity.get('publication_policy') != 'no-repeat-v1':
+        if manifest.get('history_exempt') is True or identity.get('day') != day or identity.get('publication_policy') != 'no-repeat-v1':
             continue
         report = manifest_path.parent / 'report.md'
         if hashlib.sha256(report.read_bytes()).hexdigest() != manifest['report_sha256']:
